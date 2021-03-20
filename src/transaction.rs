@@ -6,11 +6,12 @@ use serde::Deserialize;
 /// Single transaction to be performed
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(try_from = "InputTransaction")]
-pub struct Transaction {
-    pub ttype: TransactionType,
-    pub cid: u16,
-    pub tx: u32,
-    pub amount: Decimal,
+pub enum Transaction {
+    Deposit { cid: u16, tx: u32, amount: Decimal },
+    Withdrawal { cid: u16, tx: u32, amount: Decimal },
+    Dispute { cid: u16, tx: u32 },
+    Resolve { cid: u16, tx: u32 },
+    Chargeback { cid: u16, tx: u32 },
 }
 
 #[derive(Debug, Deserialize)]
@@ -35,23 +36,30 @@ impl std::convert::TryFrom<InputTransaction> for Transaction {
             amount,
         }: InputTransaction,
     ) -> Result<Self> {
-        if matches!(
-            ttype,
-            TransactionType::Deposit | TransactionType::Withdrawal
-        ) && amount.is_none()
-        {
-            return Err(anyhow!(
-                "Missing amount on transaction, but it is required, tx: {}",
-                tx
-            ));
-        }
+        let result = match ttype {
+            TransactionType::Deposit => {
+                if let Some(amount) = amount {
+                    Self::Deposit { cid, tx, amount }
+                } else {
+                    return Err(anyhow!("Missing amount on deposit transaction, tx: {}", tx));
+                }
+            }
+            TransactionType::Withdrawal => {
+                if let Some(amount) = amount {
+                    Self::Withdrawal { cid, tx, amount }
+                } else {
+                    return Err(anyhow!(
+                        "Missing amount on withdrawal transaction, tx: {}",
+                        tx
+                    ));
+                }
+            }
+            TransactionType::Dispute => Self::Dispute { cid, tx },
+            TransactionType::Resolve => Self::Resolve { cid, tx },
+            TransactionType::Chargeback => Self::Chargeback { cid, tx },
+        };
 
-        Ok(Self {
-            ttype,
-            cid,
-            tx,
-            amount: amount.unwrap_or(Decimal::new(0, 0)),
-        })
+        Ok(result)
     }
 }
 

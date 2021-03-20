@@ -1,7 +1,6 @@
 use crate::client::Client;
 use crate::decimal::Decimal;
 use crate::transaction::Transaction;
-use crate::transaction_type::TransactionType;
 use anyhow::Result;
 use std::collections::HashMap;
 
@@ -11,12 +10,12 @@ use std::collections::HashMap;
 /// handled, but I just don't want to keep all transactions in memory as it is not needed here, so
 /// I went this way to achieve lazy parsing.
 pub fn process(
-    transactions: impl IntoIterator<Item = Result<Transaction>>,
+    transactions: impl IntoIterator<Item = Transaction>,
 ) -> Result<impl Iterator<Item = Client>> {
     let mut engine = Engine::new();
 
     for transaction in transactions {
-        engine.process_transaction(transaction?);
+        engine.process_transaction(transaction);
     }
 
     Ok(engine.into_clients())
@@ -26,8 +25,8 @@ pub fn process(
 #[derive(Debug)]
 struct HistoryEntry {
     cid: u16,
-    amount: Decimal,
     // Negative for withdrawal
+    amount: Decimal,
     disputed: bool,
 }
 
@@ -36,7 +35,10 @@ struct HistoryEntry {
 struct Engine {
     /// Clients accounts
     clients: HashMap<u16, Client>,
+
     /// Transactions history
+    ///
+    /// Only transaction with own tx are stored (for preventing collisions, and allowing dispute).
     ///
     /// It is not clear if withdrawal transactions should be disputable, as in `Dispute`
     /// documentation it is said that founds should decrease while disputing, and actually
@@ -87,16 +89,12 @@ impl Engine {
     /// * In doc there is something about freezing, but there is nothing about it anywhere else - I
     /// assume frozen == locked.
     fn process_transaction(&mut self, transaction: Transaction) {
-        match transaction.ttype {
-            TransactionType::Deposit => {
-                self.process_deposit(transaction.tx, transaction.cid, transaction.amount)
-            }
-            TransactionType::Withdrawal => {
-                self.process_whitdrawal(transaction.tx, transaction.cid, transaction.amount)
-            }
-            TransactionType::Dispute => self.process_dispute(transaction.tx, transaction.cid),
-            TransactionType::Resolve => self.process_resolve(transaction.tx, transaction.cid),
-            TransactionType::Chargeback => self.process_chargeback(transaction.tx, transaction.cid),
+        match transaction {
+            Transaction::Deposit { tx, cid, amount } => self.process_deposit(tx, cid, amount),
+            Transaction::Withdrawal { tx, cid, amount } => self.process_whitdrawal(tx, cid, amount),
+            Transaction::Dispute { tx, cid } => self.process_dispute(tx, cid),
+            Transaction::Resolve { tx, cid } => self.process_resolve(tx, cid),
+            Transaction::Chargeback { tx, cid } => self.process_chargeback(tx, cid),
         }
     }
 
@@ -151,6 +149,8 @@ impl Engine {
             Some(HistoryEntry {
                 amount, disputed, ..
             }) => {
+                // Setting this should be done only after dispute is fully processed, but from this
+                // point it can't fail, so this safes hash map lookup.
                 *disputed = true;
                 *amount
             }
@@ -187,6 +187,8 @@ impl Engine {
             }) => {
                 // It is never said directly that resolved dispute makes transaction not disputed
                 // anymore, but it is just logical and makes sense to me.
+                // Also setting this should be done only after dispute is fully processed,
+                // but from this point it can't fail, so this safes hash map lookup.
                 *disputed = false;
                 *amount
             }
@@ -219,6 +221,8 @@ impl Engine {
             }) => {
                 // It is never said directly that resolved dispute makes transaction not disputed
                 // anymore, but it is just logical and makes sense to me.
+                // Also setting this should be done only after dispute is fully processed,
+                // but from this point it can't fail, so this safes hash map lookup.
                 *disputed = false;
                 *amount
             }
