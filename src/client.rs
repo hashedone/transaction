@@ -12,6 +12,18 @@ pub struct Client {
     pub locked: bool,
 }
 
+impl Client {
+    /// Creates new client from given id
+    pub fn new(cid: u16) -> Self {
+        Self {
+            cid,
+            available: Decimal::new(0, 0),
+            held: Decimal::new(0, 0),
+            locked: false,
+        }
+    }
+}
+
 /// Client info ready to be stored in output
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 struct OutputClient {

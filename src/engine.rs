@@ -1,5 +1,7 @@
 use crate::client::Client;
+use crate::decimal::Decimal;
 use crate::transaction::Transaction;
+use crate::transaction_type::TransactionType;
 use anyhow::Result;
 use std::collections::HashMap;
 
@@ -32,9 +34,28 @@ impl Engine {
         Self::default()
     }
 
+    fn client_mut(&mut self, cid: u16) -> &mut Client {
+        self.clients.entry(cid).or_insert_with(|| Client::new(cid))
+    }
+
     fn process_transaction(&mut self, transaction: Transaction) {
         match transaction.ttype {
+            TransactionType::Deposit => self.process_deposit(transaction.cid, transaction.amount),
+            TransactionType::Withdrawal => {
+                self.process_whitdrawal(transaction.cid, transaction.amount)
+            }
             _ => unimplemented!(),
+        }
+    }
+
+    fn process_deposit(&mut self, cid: u16, amount: Decimal) {
+        self.client_mut(cid).available += amount;
+    }
+
+    fn process_whitdrawal(&mut self, cid: u16, amount: Decimal) {
+        let available = &mut self.client_mut(cid).available;
+        if *available >= amount {
+            *available -= amount;
         }
     }
 

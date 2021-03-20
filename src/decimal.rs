@@ -14,13 +14,12 @@ use std::ops;
 /// are typically 2-based fractional point, which would not allow represent all values precisely.
 /// Ensuring that crate is valid and efficient for this very case is way more expensive for this
 /// particular task, comparing to just deliver own solution.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Serialize, Deserialize)]
 #[serde(try_from = "&str", into = "String")]
 pub struct Decimal(i64);
 
 impl Decimal {
     /// Creates new decimal.
-    #[cfg(test)]
     pub fn new(integral: i64, fractional: i64) -> Self {
         Self(integral * 10_000 + fractional)
     }
@@ -31,6 +30,26 @@ impl ops::Add for Decimal {
 
     fn add(self, other: Self) -> Self {
         Self(self.0 + other.0)
+    }
+}
+
+impl ops::AddAssign for Decimal {
+    fn add_assign(&mut self, other: Self) {
+        self.0 += other.0
+    }
+}
+
+impl ops::Sub for Decimal {
+    type Output = Self;
+
+    fn sub(self, other: Self) -> Self {
+        Self(self.0 - self.0)
+    }
+}
+
+impl ops::SubAssign for Decimal {
+    fn sub_assign(&mut self, other: Self) {
+        self.0 -= other.0;
     }
 }
 
