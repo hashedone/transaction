@@ -25,7 +25,7 @@ impl Client {
 }
 
 /// Client info ready to be stored in output
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Serialize)]
 struct OutputClient {
     #[serde(rename = "client")]
     cid: u16,

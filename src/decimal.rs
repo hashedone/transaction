@@ -43,13 +43,21 @@ impl ops::Sub for Decimal {
     type Output = Self;
 
     fn sub(self, other: Self) -> Self {
-        Self(self.0 - self.0)
+        Self(self.0 - other.0)
     }
 }
 
 impl ops::SubAssign for Decimal {
     fn sub_assign(&mut self, other: Self) {
         self.0 -= other.0;
+    }
+}
+
+impl ops::Neg for Decimal {
+    type Output = Self;
+
+    fn neg(self) -> Self::Output {
+        Self(-self.0)
     }
 }
 
