@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Error};
+use serde::{Deserialize, Serialize};
 
 /// Simple wrapper type to hold decimals value as fixed-point, as I refuse to perform financial
 /// calculations on floating-point numbers.
@@ -12,8 +13,17 @@ use anyhow::{anyhow, Error};
 /// are typically 2-based fractional point, which would not allow represent all values precisely.
 /// Ensuring that crate is valid and efficient for this very case is way more expensive for this
 /// particular task, comparing to just deliver own solution.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "&str", into = "String")]
 pub struct Decimal(i64);
+
+impl Decimal {
+    /// Creates new decimal.
+    #[cfg(test)]
+    pub fn new(integral: i64, fractional: i64) -> Self {
+        Self(integral * 10_000 + fractional)
+    }
+}
 
 impl std::fmt::Display for Decimal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -70,6 +80,20 @@ impl std::str::FromStr for Decimal {
         }
 
         Ok(Self(sign * (l * 10_000 + r)))
+    }
+}
+
+impl std::convert::TryFrom<&str> for Decimal {
+    type Error = Error;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        value.parse()
+    }
+}
+
+impl Into<String> for Decimal {
+    fn into(self) -> String {
+        self.to_string()
     }
 }
 
