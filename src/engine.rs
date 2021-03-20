@@ -2,6 +2,7 @@ use crate::client::Client;
 use crate::decimal::Decimal;
 use crate::transaction::Transaction;
 use anyhow::{anyhow, Result};
+use log::warn;
 use std::collections::HashMap;
 
 /// Helper function returning error if client ids doesn't matc,
@@ -28,8 +29,9 @@ pub fn process(
     let mut engine = Engine::new();
 
     for transaction in transactions {
-        // Invalid transactions are silently rejected
-        engine.process_transaction(transaction).ok();
+        if let Err(err) = engine.process_transaction(transaction) {
+            warn!("Rejecting transaction, reson: {}", err);
+        }
     }
 
     Ok(engine.into_clients())
