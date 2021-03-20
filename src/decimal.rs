@@ -1,5 +1,6 @@
-use anyhow::{anyhow, Error};
+use anyhow::{anyhow, Error, Result};
 use serde::{Deserialize, Serialize};
+use std::ops;
 
 /// Simple wrapper type to hold decimals value as fixed-point, as I refuse to perform financial
 /// calculations on floating-point numbers.
@@ -22,6 +23,14 @@ impl Decimal {
     #[cfg(test)]
     pub fn new(integral: i64, fractional: i64) -> Self {
         Self(integral * 10_000 + fractional)
+    }
+}
+
+impl ops::Add for Decimal {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self {
+        Self(self.0 + other.0)
     }
 }
 
@@ -52,7 +61,7 @@ impl std::fmt::Display for Decimal {
 impl std::str::FromStr for Decimal {
     type Err = anyhow::Error;
 
-    fn from_str(s: &str) -> Result<Self, Error> {
+    fn from_str(s: &str) -> Result<Self> {
         let s = s.trim();
         let (sign, s) = if let Some(s) = s.strip_prefix('-') {
             (-1, s)
@@ -86,7 +95,7 @@ impl std::str::FromStr for Decimal {
 impl std::convert::TryFrom<&str> for Decimal {
     type Error = Error;
 
-    fn try_from(value: &str) -> Result<Self, Self::Error> {
+    fn try_from(value: &str) -> Result<Self> {
         value.parse()
     }
 }
