@@ -139,6 +139,10 @@ impl Engine {
 
         let amount = match self.history.get_mut(&tx) {
             None => return,
+            // Rejects if:
+            // * client id missmatches
+            // * transaction amount is negative (disallow disputing withdrawal)
+            // * transaction is already disputed
             Some(HistoryEntry {
                 cid: tcid,
                 disputed,
@@ -170,6 +174,9 @@ impl Engine {
 
         let amount = match self.history.get_mut(&tx) {
             None => return,
+            // Rejects if:
+            // * client id missmatches
+            // * transaction is not disputed
             Some(HistoryEntry {
                 cid: tcid,
                 disputed,
@@ -199,6 +206,9 @@ impl Engine {
 
         let amount = match self.history.get_mut(&tx) {
             None => return,
+            // Rejects if:
+            // * client id missmatches
+            // * transaction is not disputed
             Some(HistoryEntry {
                 cid: tcid,
                 disputed,
