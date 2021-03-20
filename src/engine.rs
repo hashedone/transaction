@@ -1,8 +1,21 @@
 use crate::client::Client;
 use crate::decimal::Decimal;
 use crate::transaction::Transaction;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use std::collections::HashMap;
+
+/// Helper function returning error if client ids doesn't matc,
+fn cid_matches(expected: u16, occured: u16) -> Result<()> {
+    if expected != occured {
+        Err(anyhow!(
+            "Client id doesn't match! Expected {}, but {} given",
+            expected,
+            occured
+        ))
+    } else {
+        Ok(())
+    }
+}
 
 /// Processes all transactions and returns input.
 ///
@@ -15,7 +28,8 @@ pub fn process(
     let mut engine = Engine::new();
 
     for transaction in transactions {
-        engine.process_transaction(transaction);
+        // Invalid transactions are silently rejected
+        engine.process_transaction(transaction).ok();
     }
 
     Ok(engine.into_clients())
@@ -28,6 +42,35 @@ struct HistoryEntry {
     // Negative for withdrawal
     amount: Decimal,
     disputed: bool,
+}
+
+impl HistoryEntry {
+    /// Ensures that entry is a deposit transaction, returning error otherwise
+    fn ensure_deposit(&self) -> Result<()> {
+        if self.amount < Decimal::new(0, 0) {
+            Err(anyhow!("Transaction is not deposit"))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Ensures that entry is disputed, returning error otherwise
+    fn ensure_disputed(&self) -> Result<()> {
+        if !self.disputed {
+            Err(anyhow!("Transaction is not disputed"))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Esures that entry is *not* disputed, returning error otherwise
+    fn ensure_not_disputed(&self) -> Result<()> {
+        if self.disputed {
+            Err(anyhow!("Transaction is disputed"))
+        } else {
+            Ok(())
+        }
+    }
 }
 
 /// Internal engine implementation. Not exposed, as it is just used internally in `process` function.
@@ -78,6 +121,18 @@ impl Engine {
         self.clients.entry(cid).or_insert_with(|| Client::new(cid))
     }
 
+    /// Ensures, that there is no given tx in history, returning error otherwise
+    fn ensure_unique(&self, tx: u32) -> Result<()> {
+        if self.history.contains_key(&tx) {
+            Err(anyhow!(
+                "Transaction with tx which was previously resolved, tx: {}",
+                tx
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
     /// Processes single transaction
     ///
     /// General thoughts:
@@ -88,71 +143,80 @@ impl Engine {
     /// * Tx never colide, if they do - something went messy, transaction is rejected.
     /// * In doc there is something about freezing, but there is nothing about it anywhere else - I
     /// assume frozen == locked.
-    fn process_transaction(&mut self, transaction: Transaction) {
+    ///
+    /// Function returns `Result` when transaction is invalid and should be rejected, giving back
+    /// rejection reason.
+    fn process_transaction(&mut self, transaction: Transaction) -> Result<()> {
         match transaction {
-            Transaction::Deposit { tx, cid, amount } => self.process_deposit(tx, cid, amount),
-            Transaction::Withdrawal { tx, cid, amount } => self.process_whitdrawal(tx, cid, amount),
-            Transaction::Dispute { tx, cid } => self.process_dispute(tx, cid),
-            Transaction::Resolve { tx, cid } => self.process_resolve(tx, cid),
-            Transaction::Chargeback { tx, cid } => self.process_chargeback(tx, cid),
+            Transaction::Deposit { tx, cid, amount } => self.process_deposit(tx, cid, amount)?,
+            Transaction::Withdrawal { tx, cid, amount } => {
+                self.process_whitdrawal(tx, cid, amount)?
+            }
+            Transaction::Dispute { tx, cid } => self.process_dispute(tx, cid)?,
+            Transaction::Resolve { tx, cid } => self.process_resolve(tx, cid)?,
+            Transaction::Chargeback { tx, cid } => self.process_chargeback(tx, cid)?,
         }
+
+        Ok(())
     }
 
-    /// Proecsses deposit transaction
-    fn process_deposit(&mut self, tx: u32, cid: u16, amount: Decimal) {
-        // Prevents executing same transaction twice. It is not documented, but very intuitive
-        // behavior.
-        if self.history.contains_key(&tx) {
-            return;
-        }
+    /// Processes deposit transaction
+    fn process_deposit(&mut self, tx: u32, cid: u16, amount: Decimal) -> Result<()> {
+        self.ensure_unique(tx)?;
 
         let client = self.client_mut(cid);
-        if !client.locked {
-            client.available += amount;
-            self.log(tx, cid, amount);
-        }
+        client.ensure_unlocked()?;
+        client.available += amount;
+        self.log(tx, cid, amount);
+
+        Ok(())
     }
 
     /// Processes whithdrawal transaction
-    fn process_whitdrawal(&mut self, tx: u32, cid: u16, amount: Decimal) {
-        // Prevents executing same transaction twice. It is not documented, but very intuitive
-        // behavior.
-        if self.history.contains_key(&tx) {
-            return;
-        }
+    fn process_whitdrawal(&mut self, tx: u32, cid: u16, amount: Decimal) -> Result<()> {
+        self.ensure_unique(tx)?;
 
         let client = self.client_mut(cid);
-        if client.locked || client.available >= amount {
+        client.ensure_unlocked()?;
+        if client.available >= amount {
             client.available -= amount;
             // Cannot be disputed, but for avoiding collisions
             self.log(tx, cid, -amount);
+            Ok(())
+        } else {
+            Err(anyhow!(
+                "Trying to withdraw more than available, tx: {}, cid: {}, amount: {}",
+                tx,
+                cid,
+                amount
+            ))
         }
     }
 
     /// Processes dispute transaction
-    fn process_dispute(&mut self, tx: u32, cid: u16) {
-        if self.client(cid).locked {
-            return;
-        }
+    fn process_dispute(&mut self, tx: u32, cid: u16) -> Result<()> {
+        self.client(cid).ensure_unlocked()?;
 
         let amount = match self.history.get_mut(&tx) {
-            None => return,
+            None => {
+                return Err(anyhow!(
+                    "Transaction was not previously performed, tx: {}",
+                    tx
+                ))
+            }
             // Rejects if:
             // * client id missmatches
             // * transaction amount is negative (disallow disputing withdrawal)
             // * transaction is already disputed
-            Some(HistoryEntry {
-                cid: tcid,
-                disputed,
-                amount,
-            }) if *tcid != cid || *amount < Decimal::new(0, 0) || *disputed => return,
-            Some(HistoryEntry {
-                amount, disputed, ..
-            }) => {
+            Some(entry) => {
+                cid_matches(entry.cid, cid)?;
+                entry.ensure_deposit()?;
+                entry.ensure_not_disputed()?;
+
                 // Setting this should be done only after dispute is fully processed, but from this
                 // point it can't fail, so this safes hash map lookup.
-                *disputed = true;
-                *amount
+                entry.disputed = true;
+                entry.amount
             }
         };
 
@@ -164,33 +228,33 @@ impl Engine {
         // solution.
         client.available -= amount;
         client.held += amount;
+        Ok(())
     }
 
     /// Processes resolve
-    fn process_resolve(&mut self, tx: u32, cid: u16) {
-        if self.client(cid).locked {
-            return;
-        }
+    fn process_resolve(&mut self, tx: u32, cid: u16) -> Result<()> {
+        self.client(cid).ensure_unlocked()?;
 
         let amount = match self.history.get_mut(&tx) {
-            None => return,
+            None => {
+                return Err(anyhow!(
+                    "Transaction was not previously performed, tx: {}",
+                    tx
+                ))
+            }
             // Rejects if:
             // * client id missmatches
             // * transaction is not disputed
-            Some(HistoryEntry {
-                cid: tcid,
-                disputed,
-                ..
-            }) if *tcid != cid || !*disputed => return,
-            Some(HistoryEntry {
-                amount, disputed, ..
-            }) => {
+            Some(entry) => {
+                cid_matches(entry.cid, cid)?;
+                entry.ensure_disputed()?;
+
                 // It is never said directly that resolved dispute makes transaction not disputed
                 // anymore, but it is just logical and makes sense to me.
                 // Also setting this should be done only after dispute is fully processed,
                 // but from this point it can't fail, so this safes hash map lookup.
-                *disputed = false;
-                *amount
+                entry.disputed = false;
+                entry.amount
             }
         };
 
@@ -198,33 +262,33 @@ impl Engine {
 
         client.available += amount;
         client.held -= amount;
+        Ok(())
     }
 
     /// Process chargeback
-    fn process_chargeback(&mut self, tx: u32, cid: u16) {
-        if self.client(cid).locked {
-            return;
-        }
+    fn process_chargeback(&mut self, tx: u32, cid: u16) -> Result<()> {
+        self.client(cid).ensure_unlocked()?;
 
         let amount = match self.history.get_mut(&tx) {
-            None => return,
+            None => {
+                return Err(anyhow!(
+                    "Transaction was not previously performed, tx: {}",
+                    tx
+                ))
+            }
             // Rejects if:
             // * client id missmatches
             // * transaction is not disputed
-            Some(HistoryEntry {
-                cid: tcid,
-                disputed,
-                ..
-            }) if *tcid != cid || !*disputed => return,
-            Some(HistoryEntry {
-                amount, disputed, ..
-            }) => {
+            Some(entry) => {
+                cid_matches(entry.cid, cid)?;
+                entry.ensure_disputed()?;
+
                 // It is never said directly that resolved dispute makes transaction not disputed
                 // anymore, but it is just logical and makes sense to me.
                 // Also setting this should be done only after dispute is fully processed,
                 // but from this point it can't fail, so this safes hash map lookup.
-                *disputed = false;
-                *amount
+                entry.disputed = false;
+                entry.amount
             }
         };
 
@@ -235,6 +299,8 @@ impl Engine {
         assert!(client.held >= amount);
         client.held -= amount;
         client.locked = true;
+
+        Ok(())
     }
 
     /// Converts it to clients info (for results extraction)
@@ -250,7 +316,7 @@ mod test {
     fn transactions_test(transactions: impl IntoIterator<Item = Transaction>) -> Engine {
         let mut engine = Engine::new();
         for transaction in transactions {
-            engine.process_transaction(transaction);
+            engine.process_transaction(transaction).ok();
         }
 
         engine
@@ -259,30 +325,22 @@ mod test {
     #[test]
     fn dispute_siple() {
         let transactions = vec![
-            Transaction {
-                ttype: TransactionType::Deposit,
+            Transaction::Deposit {
                 cid: 1,
                 tx: 1,
                 amount: Decimal::new(100, 0),
             },
-            Transaction {
-                ttype: TransactionType::Withdrawal,
+            Transaction::Withdrawal {
                 cid: 1,
                 tx: 2,
                 amount: Decimal::new(50, 0),
             },
-            Transaction {
-                ttype: TransactionType::Deposit,
+            Transaction::Deposit {
                 cid: 1,
                 tx: 3,
                 amount: Decimal::new(200, 0),
             },
-            Transaction {
-                ttype: TransactionType::Dispute,
-                cid: 1,
-                tx: 1,
-                amount: Decimal::new(0, 0),
-            },
+            Transaction::Dispute { cid: 1, tx: 1 },
         ];
 
         let engine = transactions_test(transactions);
@@ -300,36 +358,27 @@ mod test {
     #[test]
     fn dispute_into_dept() {
         let transactions = vec![
-            Transaction {
-                ttype: TransactionType::Deposit,
+            Transaction::Deposit {
                 cid: 1,
                 tx: 1,
                 amount: Decimal::new(100, 0),
             },
-            Transaction {
-                ttype: TransactionType::Withdrawal,
+            Transaction::Withdrawal {
                 cid: 1,
                 tx: 2,
                 amount: Decimal::new(50, 0),
             },
-            Transaction {
-                ttype: TransactionType::Deposit,
+            Transaction::Deposit {
                 cid: 1,
                 tx: 3,
                 amount: Decimal::new(200, 0),
             },
-            Transaction {
-                ttype: TransactionType::Withdrawal,
+            Transaction::Withdrawal {
                 cid: 1,
                 tx: 4,
                 amount: Decimal::new(200, 0),
             },
-            Transaction {
-                ttype: TransactionType::Dispute,
-                cid: 1,
-                tx: 1,
-                amount: Decimal::new(0, 0),
-            },
+            Transaction::Dispute { cid: 1, tx: 1 },
         ];
 
         let engine = transactions_test(transactions);

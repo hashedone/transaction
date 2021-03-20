@@ -76,7 +76,6 @@ pub fn read_transactions(reader: impl std::io::Read) -> impl Iterator<Item = Res
 mod test {
     use super::{read_transactions, Transaction};
     use crate::decimal::Decimal;
-    use crate::transaction_type::TransactionType;
 
     #[test]
     fn reading() {
@@ -85,37 +84,29 @@ type, client, tx, amount
 deposit, 1, 1, 1.0
 withdrawal, 1, 4, 1.5
 dispute, 1, 5,
-dispute, 1, 6,3.0"#;
+dispute, 1, 6,3.0
+resolve, 1, 5,
+chargeback, 1, 6,"#;
 
         assert_eq!(
             read_transactions(&data[..])
                 .map(Result::unwrap)
                 .collect::<Vec<_>>(),
             vec![
-                Transaction {
-                    ttype: TransactionType::Deposit,
+                Transaction::Deposit {
                     cid: 1,
                     tx: 1,
                     amount: Decimal::new(1, 0),
                 },
-                Transaction {
-                    ttype: TransactionType::Withdrawal,
+                Transaction::Withdrawal {
                     cid: 1,
                     tx: 4,
                     amount: Decimal::new(1, 5000),
                 },
-                Transaction {
-                    ttype: TransactionType::Dispute,
-                    cid: 1,
-                    tx: 5,
-                    amount: Decimal::new(0, 0),
-                },
-                Transaction {
-                    ttype: TransactionType::Dispute,
-                    cid: 1,
-                    tx: 6,
-                    amount: Decimal::new(3, 0),
-                },
+                Transaction::Dispute { cid: 1, tx: 5 },
+                Transaction::Dispute { cid: 1, tx: 6 },
+                Transaction::Resolve { cid: 1, tx: 5 },
+                Transaction::Chargeback { cid: 1, tx: 6 },
             ]
         );
     }

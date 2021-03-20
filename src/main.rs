@@ -13,9 +13,8 @@ fn main() -> Result<()> {
         .next()
         .ok_or_else(|| anyhow!("Missing input file"))?;
 
-    let transactions = transaction::read_transactions(std::fs::File::open(path)?)
-        // Silently ignoring invalid transactions
-        .filter_map(|t| t.ok());
+    let transactions =
+        transaction::read_transactions(std::fs::File::open(path)?).filter_map(|t| t.ok());
     let output = engine::process(transactions)?;
     client::store_clients(std::io::stdout(), output)
 }

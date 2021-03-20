@@ -1,5 +1,5 @@
 use crate::decimal::Decimal;
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use serde::Serialize;
 
 /// Client info
@@ -20,6 +20,15 @@ impl Client {
             available: Decimal::new(0, 0),
             held: Decimal::new(0, 0),
             locked: false,
+        }
+    }
+
+    /// Returns error if client is locked
+    pub fn ensure_unlocked(&self) -> Result<()> {
+        if self.locked {
+            Err(anyhow!("Client is locked, client id: {}", self.cid))
+        } else {
+            Ok(())
         }
     }
 }
