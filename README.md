@@ -27,6 +27,7 @@ Obviously `csv` and `serde` for serialization. Also I included `anyhow` for easy
 There were some decisions to be done, which were not precisely described, here are most important:
 
 * reasonable ppl doesn't perform money calculations on floats, and I try to be reasonable, so everything is done on fixed-point amount
+* it was not specified if it is allowed to skip last comma in csv, when there is no amount; I decided to keep input file correct, so all fields has to be present, except amount might be empty - providing amount for dispute/resolve/chargeback is allowed, but will be ignored (but if I would be sure, that such situation doesn't occur in test data, I would prefer to reject such transactions)
 * any transaction with tx, should have unique tx; This is actually documented, but there is nothing about what if it is not - I decided to reject such transaction
 * no transactions may be performed on locked client; It might be very much wrong assumption but it seems like client which was charged back is just untrustfull
 * only deposit transaction can be disputed; This again might be very invalid assumption, but disputing withdraw transaction might create ficional money on client acc which could be used, this just looks logically wrong
